@@ -33,10 +33,10 @@ if not os.path.exists("/var/log/ansible/hosts"):
 
 def log(host, category, data):
     if type(data) == dict:
- #       if 'verbose_override' in data:
- #           # avoid logging extraneous data from facts
- #           data = 'omitted'
- #       else:
+        if 'verbose_override' in data:
+            # avoid logging extraneous data from facts
+            data = 'omitted'
+        else:
     	data = data.copy()
    # invocation = data.pop('invocation', None)
     data = json.dumps(data)
@@ -120,8 +120,8 @@ class CallbackModule(object):
         pass
 
     def runner_on_async_failed(self, host, res, jid):
-	if hasattr(self.task, 'role_name'):
-		res['role'] = self.task.role_name
+        if hasattr(self.task, 'role_name'):
+            res['role'] = self.task.role_name
         log(host, 'ASYNC_FAILED', res)
 
     def playbook_on_start(self):
