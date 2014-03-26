@@ -94,6 +94,8 @@ def get_aws_connection_info(module):
             access_key = os.environ['AWS_ACCESS_KEY_ID']
         elif 'AWS_ACCESS_KEY' in os.environ:
             access_key = os.environ['AWS_ACCESS_KEY']
+        elif boto.config.has_option('Credentials', 'aws_access_key_id'):
+            access_key = boto.config.get('Credentials', 'aws_access_key_id')
         else:
             # in case access_key came in as empty string
             access_key = None
@@ -105,6 +107,8 @@ def get_aws_connection_info(module):
             secret_key = os.environ['AWS_SECRET_ACCESS_KEY']
         elif 'AWS_SECRET_KEY' in os.environ:
             secret_key = os.environ['AWS_SECRET_KEY']
+        elif boto.config.has_option('Credentials', 'aws_secret_access_key'):
+            access_key = boto.config.get('Credentials', 'aws_secret_access_key')
         else:
             # in case secret_key came in as empty string
             secret_key = None
