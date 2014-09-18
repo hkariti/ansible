@@ -127,7 +127,9 @@ class RabbitMqUser(object):
     def _exec(self, args, run_in_check_mode=False):
         if not self.module.check_mode or (self.module.check_mode and run_in_check_mode):
             cmd = [self._rabbitmqctl, '-q', '-n', self.node]
-            rc, out, err = self.module.run_command(cmd + args, check_rc=True)
+            rc, out, err = self.module.run_command(cmd + args)
+            if rc > 0:
+                raise RuntimeError(err)
             return out.splitlines()
         return list()
 
@@ -161,13 +163,26 @@ class RabbitMqUser(object):
         return dict()
 
     def add(self):
-        self._exec(['add_user', self.username, self.password])
+        try:
+            self._exec(['add_user', self.username, self.password])
+            return True
+        except RuntimeError as e:
+            if 'user_already_exists' in str(e):
+                return False
+            raise
 
     def delete(self):
-        self._exec(['delete_user', self.username])
+        try:
+            self._exec(['delete_user', self.username])
+            return True
+        except RuntimeError as e:
+            if 'no_such_user' in str(e):
+                return False
+            raise
 
     def set_tags(self):
         self._exec(['set_user_tags', self.username] + self.tags)
+        return True
 
     def set_permissions(self):
         cmd = ['set_permissions']
@@ -178,6 +193,7 @@ class RabbitMqUser(object):
         cmd.append(self.permissions['write_priv'])
         cmd.append(self.permissions['read_priv'])
         self._exec(cmd)
+        return True
 
     def has_tags_modifications(self):
         return set(self.tags) != set(self._tags)
@@ -217,29 +233,27 @@ def main():
     rabbitmq_user = RabbitMqUser(module, username, password, tags, vhost, configure_priv, write_priv, read_priv, node)
 
     changed = False
-    if rabbitmq_user.get():
-        if state == 'absent':
-            rabbitmq_user.delete()
-            changed = True
-        else:
-            if force:
-                rabbitmq_user.delete()
-                rabbitmq_user.add()
-                rabbitmq_user.get()
-                changed = True
+    try:
+        if rabbitmq_user.get():
+            if state == 'absent':
+                    changed |= rabbitmq_user.delete()
+            else:
+                if force:
+                    changed |= rabbitmq_user.delete()
+                    changed |= rabbitmq_user.add()
+                    rabbitmq_user.get()
 
-            if rabbitmq_user.has_tags_modifications():
-                rabbitmq_user.set_tags()
-                changed = True
+                if rabbitmq_user.has_tags_modifications():
+                    changed |= rabbitmq_user.set_tags()
 
-            if rabbitmq_user.has_permissions_modifications():
-                rabbitmq_user.set_permissions()
-                changed = True
-    elif state == 'present':
-        rabbitmq_user.add()
-        rabbitmq_user.set_tags()
-        rabbitmq_user.set_permissions()
-        changed = True
+                if rabbitmq_user.has_permissions_modifications():
+                    changed |= rabbitmq_user.set_permissions()
+        elif state == 'present':
+            changed |= rabbitmq_user.add()
+            changed |= rabbitmq_user.set_tags()
+            changed |= rabbitmq_user.set_permissions()
+    except RuntimeError as e:
+        module.fail_json(msg=str(e))
 
     module.exit_json(changed=changed, user=username, state=state)
 
