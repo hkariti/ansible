@@ -154,7 +154,6 @@ class Runner(object):
         run_hosts=None,                     # an optional list of pre-calculated hosts to run on
         no_log=False,                       # option to enable/disable logging for a given task
         run_once=False,                     # option to enable/disable host bypass loop for a given task
-        sudo_exe=C.DEFAULT_SUDO_EXE,        # ex: /usr/local/bin/sudo
         ):
 
         # used to lock multiprocess inputs and outputs at various levels
@@ -213,11 +212,9 @@ class Runner(object):
         self.vault_pass       = vault_pass
         self.no_log           = no_log
         self.run_once         = run_once
-        self.sudo_exe         = sudo_exe
 
         if self.transport == 'smart':
-            # If the transport is 'smart', check to see if certain conditions
-            # would prevent us from using ssh, and fallback to paramiko.
+            # if the transport is 'smart' see if SSH can support ControlPersist if not use paramiko
             # 'smart' is the default since 1.2.1/1.3
             self.transport = "ssh"
             if sys.platform.startswith('darwin') and self.remote_pass:
@@ -226,11 +223,7 @@ class Runner(object):
                 # paramiko on that OS when a SSH password is specified
                 self.transport = "paramiko"
             else:
-                # see if SSH can support ControlPersist if not use paramiko
-                cmd = subprocess.Popen(['ssh','-o','ControlPersist'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                (out, err) = cmd.communicate()
-                if "Bad configuration option" in err:
-                    self.transport = "paramiko"
+                self.transport = "ssh"
 
         # save the original transport, in case it gets
         # changed later via options like accelerate
@@ -390,16 +383,6 @@ class Runner(object):
             if inject['hostvars'][host].get('ansible_ssh_user'):
                 # user for delegate host in inventory
                 thisuser = inject['hostvars'][host].get('ansible_ssh_user')
-        else:
-            # look up the variables for the host directly from inventory
-            try:
-                host_vars = self.inventory.get_variables(host, vault_password=self.vault_pass)
-                if 'ansible_ssh_user' in host_vars:
-                    thisuser = host_vars['ansible_ssh_user']
-            except Exception, e:
-                # the hostname was not found in the inventory, so
-                # we just ignore this and try the next method
-                pass
 
         if thisuser is None and self.remote_user:
             # user defined by play/runner
@@ -606,22 +589,7 @@ class Runner(object):
         host_variables = self.inventory.get_variables(host, vault_password=self.vault_pass)
         combined_cache = self.get_combined_cache()
 
-        # use combined_cache and host_variables to template the module_vars
-        # we update the inject variables with the data we're about to template
-        # since some of the variables we'll be replacing may be contained there too
-        module_vars_inject = utils.combine_vars(host_variables, combined_cache.get(host, {}))
-        module_vars_inject = utils.combine_vars(self.module_vars, module_vars_inject)
-        module_vars = template.template(self.basedir, self.module_vars, module_vars_inject)
-
-        # remove bad variables from the module vars, which may be in there due
-        # the way role declarations are specified in playbooks
-        if 'tags' in module_vars:
-            del module_vars['tags']
-        if 'when' in module_vars:
-            del module_vars['when']
-
-        # start building the dictionary of injected variables
-        inject = {}
+        inject = utils.combine_vars({}, combined_cache.get(host, {}))
 
         # default vars are the lowest priority
         inject = utils.combine_vars(inject, self.default_vars)
@@ -629,12 +597,17 @@ class Runner(object):
         inject = utils.combine_vars(inject, host_variables)
         # then the setup_cache which contains facts gathered
         inject = utils.combine_vars(inject, self.setup_cache.get(host, {}))
+        # then come the module variables
+        inject = utils.combine_vars(inject, self.module_vars)
         # followed by vars (vars, vars_files, vars/main.yml)
         inject = utils.combine_vars(inject, self.vars_cache.get(host, {}))
-        # then come the module variables
-        inject = utils.combine_vars(inject, module_vars)
         # and finally -e vars are the highest priority
         inject = utils.combine_vars(inject, self.extra_vars)
+
+        # once all variables have been gathered and their precedence worked out
+        # resolve any templates within variables.
+        inject = template.template(self.basedir, inject, self.module_vars)
+
         # and then special vars
         inject.setdefault('ansible_ssh_user', self.remote_user)
         inject['group_names']  = host_variables.get('group_names', [])
@@ -647,6 +620,7 @@ class Runner(object):
         inject['combined_cache'] = combined_cache
 
         return inject
+
 
     def _executor_internal(self, host, new_stdin):
         ''' executes any module one or more times '''
@@ -686,24 +660,9 @@ class Runner(object):
                 if os.path.exists(filesdir):
                     basedir = filesdir
 
-            try:
-                items_terms = self.module_vars.get('items_lookup_terms', '')
-                items_terms = template.template(basedir, items_terms, inject)
-                items = utils.plugins.lookup_loader.get(items_plugin, runner=self, basedir=basedir).run(items_terms, inject=inject)
-            except errors.AnsibleUndefinedVariable, e:
-                if 'has no attribute' in str(e):
-                    # the undefined variable was an attribute of a variable that does
-                    # exist, so try and run this through the conditional check to see
-                    # if the user wanted to skip something on being undefined
-                    if utils.check_conditional(self.conditional, self.basedir, inject, fail_on_undefined=True):
-                        # the conditional check passed, so we have to fail here
-                        raise
-                    else:
-                        # the conditional failed, so we skip this task
-                        result = utils.jsonify(dict(changed=False, skipped=True))
-                        self.callbacks.on_skipped(host, None)
-                        return ReturnData(host=host, result=result)
-
+            items_terms = self.module_vars.get('items_lookup_terms', '')
+            items_terms = template.template(basedir, items_terms, inject)
+            items = utils.plugins.lookup_loader.get(items_plugin, runner=self, basedir=basedir).run(items_terms, inject=inject)
             # strip out any jinja2 template syntax within
             # the data returned by the lookup plugin
             items = utils._clean_data_struct(items, from_remote=True)
@@ -852,7 +811,6 @@ class Runner(object):
         self.sudo_pass = inject.get('ansible_sudo_pass', self.sudo_pass)
         self.su = inject.get('ansible_su', self.su)
         self.su_pass = inject.get('ansible_su_pass', self.su_pass)
-        self.sudo_exe = inject.get('ansible_sudo_exe', self.sudo_exe)
 
         # select default root user in case self.sudo requested
         # but no user specified; happens e.g. in host vars when
@@ -1274,13 +1232,9 @@ class Runner(object):
 
         # Search module path(s) for named module.
         module_suffixes = getattr(conn, 'default_suffixes', None)
-        module_path = utils.plugins.module_finder.find_plugin(module_name, module_suffixes, transport=self.transport)
+        module_path = utils.plugins.module_finder.find_plugin(module_name, module_suffixes)
         if module_path is None:
-            module_path2 = utils.plugins.module_finder.find_plugin('ping', module_suffixes)
-            if module_path2 is not None:
-                raise errors.AnsibleFileNotFound("module %s not found in configured module paths" % (module_name))
-            else:
-                raise errors.AnsibleFileNotFound("module %s not found in configured module paths.  Additionally, core modules are missing. If this is a checkout, run 'git submodule update --init --recursive' to correct this problem." % (module_name))
+            raise errors.AnsibleFileNotFound("module %s not found in %s" % (module_name, utils.plugins.module_finder.print_paths()))
 
 
         # insert shared code and arguments into the module
