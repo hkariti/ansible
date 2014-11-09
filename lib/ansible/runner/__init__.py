@@ -606,7 +606,7 @@ class Runner(object):
 
         # once all variables have been gathered and their precedence worked out
         # resolve any templates within variables.
-        inject = template.template(self.basedir, inject, self.module_vars)
+        inject = template.template(self.basedir, inject, inject)
 
         # and then special vars
         inject.setdefault('ansible_ssh_user', self.remote_user)
