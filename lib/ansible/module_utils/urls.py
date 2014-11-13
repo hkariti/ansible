@@ -133,7 +133,7 @@ class SSLValidationHandler(urllib2.BaseHandler):
     def http_request(self, req):
         tmp_ca_cert_path, paths_checked = self.get_ca_certs()
         try:
-            server_cert = ssl.get_server_certificate((self.hostname, self.port), ca_certs=tmp_ca_cert_path)
+            server_cert = ssl.get_server_certificate((self.hostname, self.port), ca_certs=tmp_ca_cert_path, ssl_version=ssl.PROTOCOL_SSLv23)
         except ssl.SSLError:
             # fail if we tried all of the certs but none worked
             self.module.fail_json(msg='Failed to validate the SSL certificate for %s:%s. ' % (self.hostname, self.port) + \
