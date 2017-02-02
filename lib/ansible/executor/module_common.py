@@ -312,7 +312,7 @@ if __name__ == '__main__':
     except:
         pass
     with open("/tmp/module_profile/profile".format(start_time), "a") as f:
-        f.write("%d %d %d\n" % (start_time, end_time, end_time - start_time))
+        f.write("{0} {1} {2}\n".format(start_time, end_time, end_time - start_time))
     sys.exit(exitcode)
 '''
 
