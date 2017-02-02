@@ -262,6 +262,8 @@ if __name__ == '__main__':
     # See comments in the debug() method for information on debugging
     #
 
+    import time
+    start_time = time.time()
     ZIPLOADER_PARAMS = %(params)s
     if PY3:
         ZIPLOADER_PARAMS = ZIPLOADER_PARAMS.encode('utf-8')
@@ -304,6 +306,13 @@ if __name__ == '__main__':
         except OSError:
             # tempdir creation probably failed
             pass
+    end_time = time.time()
+    try:
+        os.mkdir("/tmp/module_profile")
+    except:
+        pass
+    with open("/tmp/module_profile/%s" % start_time) as f:
+        f.write(end_time - start_time)
     sys.exit(exitcode)
 '''
 
