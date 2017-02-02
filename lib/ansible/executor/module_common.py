@@ -311,8 +311,8 @@ if __name__ == '__main__':
         os.mkdir("/tmp/module_profile")
     except:
         pass
-    with open("/tmp/module_profile/{0}".format(start_time)) as f:
-        f.write(end_time - start_time)
+    with open("/tmp/module_profile/profile".format(start_time), "a") as f:
+        f.write("%d %d %d\n" % (start_time, end_time, end_time - start_time))
     sys.exit(exitcode)
 '''
 
